@@ -5,20 +5,23 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	kyvernov1beta1 "github.com/kyverno/kyverno/api/kyverno/v1beta1"
 	kyvernov2alpha1 "github.com/kyverno/kyverno/api/kyverno/v2alpha1"
 	kyvernov2alpha1listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v2alpha1"
 	"github.com/kyverno/kyverno/pkg/clients/dclient"
 	"github.com/kyverno/kyverno/pkg/config"
+	engineapi "github.com/kyverno/kyverno/pkg/engine/api"
 	enginecontext "github.com/kyverno/kyverno/pkg/engine/context"
+	"github.com/kyverno/kyverno/pkg/engine/factories"
 	"github.com/kyverno/kyverno/pkg/engine/jmespath"
 	"github.com/kyverno/kyverno/pkg/event"
 	"github.com/kyverno/kyverno/pkg/metrics"
 	controllerutils "github.com/kyverno/kyverno/pkg/utils/controller"
 	"github.com/kyverno/kyverno/pkg/utils/match"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric/global"
-	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,31 +37,32 @@ type handlers struct {
 	cpolLister kyvernov2alpha1listers.ClusterCleanupPolicyLister
 	polLister  kyvernov2alpha1listers.CleanupPolicyLister
 	nsLister   corev1listers.NamespaceLister
+	cmResolver engineapi.ConfigmapResolver
 	recorder   record.EventRecorder
 	jp         jmespath.Interface
 	metrics    cleanupMetrics
 }
 
 type cleanupMetrics struct {
-	deletedObjectsTotal  instrument.Int64Counter
-	cleanupFailuresTotal instrument.Int64Counter
+	deletedObjectsTotal  metric.Int64Counter
+	cleanupFailuresTotal metric.Int64Counter
 }
 
 func newCleanupMetrics(logger logr.Logger) cleanupMetrics {
-	meter := global.MeterProvider().Meter(metrics.MeterName)
+	meter := otel.GetMeterProvider().Meter(metrics.MeterName)
 	deletedObjectsTotal, err := meter.Int64Counter(
 		"kyverno_cleanup_controller_deletedobjects",
-		instrument.WithDescription("can be used to track number of deleted objects."),
+		metric.WithDescription("can be used to track number of deleted objects."),
 	)
 	if err != nil {
-		logger.Error(err, "Failed to create instrument, kyverno_cleanup_controller_deletedobjects_total")
+		logger.Error(err, "Failed to create instrument, cleanup_controller_deletedobjects_total")
 	}
 	cleanupFailuresTotal, err := meter.Int64Counter(
 		"kyverno_cleanup_controller_errors",
-		instrument.WithDescription("can be used to track number of cleanup failures."),
+		metric.WithDescription("can be used to track number of cleanup failures."),
 	)
 	if err != nil {
-		logger.Error(err, "Failed to create instrument, kyverno_cleanup_controller_errors_total")
+		logger.Error(err, "Failed to create instrument, cleanup_controller_errors_total")
 	}
 	return cleanupMetrics{
 		deletedObjectsTotal:  deletedObjectsTotal,
@@ -72,6 +76,7 @@ func New(
 	cpolLister kyvernov2alpha1listers.ClusterCleanupPolicyLister,
 	polLister kyvernov2alpha1listers.CleanupPolicyLister,
 	nsLister corev1listers.NamespaceLister,
+	cmResolver engineapi.ConfigmapResolver,
 	jp jmespath.Interface,
 ) *handlers {
 	return &handlers{
@@ -79,6 +84,7 @@ func New(
 		cpolLister: cpolLister,
 		polLister:  polLister,
 		nsLister:   nsLister,
+		cmResolver: cmResolver,
 		recorder:   event.NewRecorder(event.CleanupController, client.GetEventsInterface()),
 		metrics:    newCleanupMetrics(logger),
 		jp:         jp,
@@ -117,6 +123,22 @@ func (h *handlers) executePolicy(
 	kinds := sets.New(spec.MatchResources.GetKinds()...)
 	debug := logger.V(4)
 	var errs []error
+
+	enginectx := enginecontext.NewContext(h.jp)
+	ctxFactory := factories.DefaultContextLoaderFactory(h.cmResolver)
+
+	loader := ctxFactory(nil, kyvernov1.Rule{})
+	if err := loader.Load(
+		ctx,
+		h.jp,
+		h.client,
+		nil,
+		spec.Context,
+		enginectx,
+	); err != nil {
+		return err
+	}
+
 	for kind := range kinds {
 		commonLabels := []attribute.KeyValue{
 			attribute.String("policy_type", policy.GetKind()),
@@ -131,7 +153,7 @@ func (h *handlers) executePolicy(
 			debug.Error(err, "failed to list resources")
 			errs = append(errs, err)
 			if h.metrics.cleanupFailuresTotal != nil {
-				h.metrics.cleanupFailuresTotal.Add(ctx, 1, commonLabels...)
+				h.metrics.cleanupFailuresTotal.Add(ctx, 1, metric.WithAttributes(commonLabels...))
 			}
 		} else {
 			for i := range list.Items {
@@ -188,7 +210,7 @@ func (h *handlers) executePolicy(
 					}
 					// check conditions
 					if spec.Conditions != nil {
-						enginectx := enginecontext.NewContext(h.jp)
+						enginectx.Reset()
 						if err := enginectx.SetTargetResource(resource.Object); err != nil {
 							debug.Error(err, "failed to add resource in context")
 							errs = append(errs, err)
@@ -221,14 +243,14 @@ func (h *handlers) executePolicy(
 					logger.WithValues("name", name, "namespace", namespace).Info("resource matched, it will be deleted...")
 					if err := h.client.DeleteResource(ctx, resource.GetAPIVersion(), resource.GetKind(), namespace, name, false); err != nil {
 						if h.metrics.cleanupFailuresTotal != nil {
-							h.metrics.cleanupFailuresTotal.Add(ctx, 1, labels...)
+							h.metrics.cleanupFailuresTotal.Add(ctx, 1, metric.WithAttributes(labels...))
 						}
 						debug.Error(err, "failed to delete resource")
 						errs = append(errs, err)
 						h.createEvent(policy, resource, err)
 					} else {
 						if h.metrics.deletedObjectsTotal != nil {
-							h.metrics.deletedObjectsTotal.Add(ctx, 1, labels...)
+							h.metrics.deletedObjectsTotal.Add(ctx, 1, metric.WithAttributes(labels...))
 						}
 						debug.Info("deleted")
 						h.createEvent(policy, resource, nil)

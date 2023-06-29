@@ -47,16 +47,13 @@ var (
 	errOperationForbidden    = errors.New("variables are forbidden in the path of a JSONPatch")
 )
 
+var allowedJsonPatch = regexp.MustCompile("^/")
+
 // validateJSONPatchPathForForwardSlash checks for forward slash
 func validateJSONPatchPathForForwardSlash(patch string) error {
 	// Replace all variables in PatchesJSON6902, all variable checks should have happened already.
 	// This prevents further checks from failing unexpectedly.
 	patch = variables.ReplaceAllVars(patch, func(s string) string { return "kyvernojsonpatchvariable" })
-
-	re, err := regexp.Compile("^/")
-	if err != nil {
-		return err
-	}
 
 	jsonPatch, err := yaml.ToJSON([]byte(patch))
 	if err != nil {
@@ -74,7 +71,7 @@ func validateJSONPatchPathForForwardSlash(patch string) error {
 			return err
 		}
 
-		val := re.MatchString(path)
+		val := allowedJsonPatch.MatchString(path)
 
 		if !val {
 			return fmt.Errorf("%s", path)
@@ -180,6 +177,14 @@ func Validate(policy, oldPolicy kyvernov1.PolicyInterface, client dclient.Interf
 		err := validateNamespaces(spec, specPath.Child("validationFailureActionOverrides"))
 		if err != nil {
 			return warnings, err
+		}
+	}
+	if !policy.AdmissionProcessingEnabled() && !policy.BackgroundProcessingEnabled() {
+		return warnings, fmt.Errorf("disabling both admission and background processing is not allowed")
+	}
+	if !policy.AdmissionProcessingEnabled() {
+		if spec.HasMutate() || spec.HasGenerate() || spec.HasVerifyImages() {
+			return warnings, fmt.Errorf("disabling admission processing is only allowed with validation policies")
 		}
 	}
 
@@ -352,6 +357,10 @@ func Validate(policy, oldPolicy kyvernov1.PolicyInterface, client dclient.Interf
 			}
 			checkForScaleSubresource(mutationJson, allKinds, &warnings)
 			checkForStatusSubresource(mutationJson, allKinds, &warnings)
+		}
+
+		if rule.HasVerifyImages() {
+			checkForDeprecatedFieldsInVerifyImages(rule, &warnings)
 		}
 	}
 	if !mock && (spec.SchemaValidation == nil || *spec.SchemaValidation) {
@@ -1296,5 +1305,16 @@ func checkForStatusSubresource(ruleTypeJson []byte, allKinds []string, warnings 
 		}
 		msg := "You are matching on status but not including the status subresource in the policy."
 		*warnings = append(*warnings, msg)
+	}
+}
+
+func checkForDeprecatedFieldsInVerifyImages(rule kyvernov1.Rule, warnings *[]string) {
+	for _, imageVerify := range rule.VerifyImages {
+		for _, attestation := range imageVerify.Attestations {
+			if attestation.PredicateType != "" {
+				msg := fmt.Sprintf("predicateType has been deprecated use 'type: %s' instead of 'prediacteType: %s'", attestation.PredicateType, attestation.PredicateType)
+				*warnings = append(*warnings, msg)
+			}
+		}
 	}
 }

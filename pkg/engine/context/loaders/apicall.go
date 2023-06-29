@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
-	"github.com/kyverno/kyverno/pkg/clients/dclient"
+	engineapi "github.com/kyverno/kyverno/pkg/engine/api"
 	"github.com/kyverno/kyverno/pkg/engine/apicall"
 	enginecontext "github.com/kyverno/kyverno/pkg/engine/context"
 	"github.com/kyverno/kyverno/pkg/engine/jmespath"
@@ -18,7 +18,7 @@ type apiLoader struct {
 	entry     kyvernov1.ContextEntry
 	enginectx enginecontext.Interface
 	jp        jmespath.Interface
-	client    dclient.Interface
+	client    engineapi.RawClient
 	data      []byte
 }
 
@@ -28,7 +28,7 @@ func NewAPILoader(
 	entry kyvernov1.ContextEntry,
 	enginectx enginecontext.Interface,
 	jp jmespath.Interface,
-	client dclient.Interface,
+	client engineapi.RawClient,
 ) enginecontext.Loader {
 	return &apiLoader{
 		ctx:       ctx,

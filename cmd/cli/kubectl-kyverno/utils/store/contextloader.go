@@ -4,12 +4,10 @@ import (
 	"context"
 
 	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
-	"github.com/kyverno/kyverno/pkg/clients/dclient"
 	engineapi "github.com/kyverno/kyverno/pkg/engine/api"
 	enginecontext "github.com/kyverno/kyverno/pkg/engine/context"
 	"github.com/kyverno/kyverno/pkg/engine/factories"
 	"github.com/kyverno/kyverno/pkg/engine/jmespath"
-	"github.com/kyverno/kyverno/pkg/registryclient"
 )
 
 func ContextLoaderFactory(cmResolver engineapi.ConfigmapResolver) engineapi.ContextLoaderFactory {
@@ -48,8 +46,8 @@ type wrapper struct {
 func (w wrapper) Load(
 	ctx context.Context,
 	jp jmespath.Interface,
-	client dclient.Interface,
-	rclient registryclient.Client,
+	client engineapi.RawClient,
+	rclientFactory engineapi.RegistryClientFactory,
 	contextEntries []kyvernov1.ContextEntry,
 	jsonContext enginecontext.Interface,
 ) error {
@@ -57,7 +55,7 @@ func (w wrapper) Load(
 		client = nil
 	}
 	if !GetRegistryAccess() {
-		rclient = nil
+		rclientFactory = nil
 	}
-	return w.inner.Load(ctx, jp, client, rclient, contextEntries, jsonContext)
+	return w.inner.Load(ctx, jp, client, rclientFactory, contextEntries, jsonContext)
 }

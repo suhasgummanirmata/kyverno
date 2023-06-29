@@ -29,9 +29,13 @@ var (
 	EnableDeferredLoading    = newToggle(defaultEnableDeferredLoading, enableDeferredLoadingEnvVar)
 )
 
-type Toggle interface {
-	Enabled() bool
+type ToggleFlag interface {
 	Parse(string) error
+}
+
+type Toggle interface {
+	ToggleFlag
+	enabled() bool
 }
 
 type toggle struct {
@@ -40,7 +44,7 @@ type toggle struct {
 	envVar       string
 }
 
-func newToggle(defaultValue bool, envVar string) *toggle {
+func newToggle(defaultValue bool, envVar string) Toggle {
 	return &toggle{
 		defaultValue: defaultValue,
 		envVar:       envVar,
@@ -56,7 +60,7 @@ func (t *toggle) Parse(in string) error {
 	}
 }
 
-func (t *toggle) Enabled() bool {
+func (t *toggle) enabled() bool {
 	if t.value != nil {
 		return *t.value
 	}

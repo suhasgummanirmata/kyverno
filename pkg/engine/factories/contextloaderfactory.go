@@ -6,13 +6,11 @@ import (
 
 	"github.com/go-logr/logr"
 	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
-	"github.com/kyverno/kyverno/pkg/clients/dclient"
 	engineapi "github.com/kyverno/kyverno/pkg/engine/api"
 	enginecontext "github.com/kyverno/kyverno/pkg/engine/context"
 	"github.com/kyverno/kyverno/pkg/engine/context/loaders"
 	"github.com/kyverno/kyverno/pkg/engine/jmespath"
 	"github.com/kyverno/kyverno/pkg/logging"
-	"github.com/kyverno/kyverno/pkg/registryclient"
 	"github.com/kyverno/kyverno/pkg/toggle"
 )
 
@@ -46,8 +44,8 @@ type contextLoader struct {
 func (l *contextLoader) Load(
 	ctx context.Context,
 	jp jmespath.Interface,
-	client dclient.Interface,
-	rclient registryclient.Client,
+	client engineapi.RawClient,
+	rclientFactory engineapi.RegistryClientFactory,
 	contextEntries []kyvernov1.ContextEntry,
 	jsonContext enginecontext.Interface,
 ) error {
@@ -57,12 +55,12 @@ func (l *contextLoader) Load(
 		}
 	}
 	for _, entry := range contextEntries {
-		loader, err := l.newLoader(ctx, jp, client, rclient, entry, jsonContext)
+		loader, err := l.newLoader(ctx, jp, client, rclientFactory, entry, jsonContext)
 		if err != nil {
 			return fmt.Errorf("failed to create deferred loader for context entry %s", entry.Name)
 		}
 		if loader != nil {
-			if toggle.EnableDeferredLoading.Enabled() {
+			if toggle.FromContext(ctx).EnableDeferredLoading() {
 				if err := jsonContext.AddDeferredLoader(loader); err != nil {
 					return err
 				}
@@ -79,8 +77,8 @@ func (l *contextLoader) Load(
 func (l *contextLoader) newLoader(
 	ctx context.Context,
 	jp jmespath.Interface,
-	client dclient.Interface,
-	rclient registryclient.Client,
+	client engineapi.RawClient,
+	rclientFactory engineapi.RegistryClientFactory,
 	entry kyvernov1.ContextEntry,
 	jsonContext enginecontext.Interface,
 ) (enginecontext.DeferredLoader, error) {
@@ -101,8 +99,8 @@ func (l *contextLoader) newLoader(
 			return nil, nil
 		}
 	} else if entry.ImageRegistry != nil {
-		if rclient != nil {
-			l := loaders.NewImageDataLoader(ctx, l.logger, entry, jsonContext, jp, rclient)
+		if rclientFactory != nil {
+			l := loaders.NewImageDataLoader(ctx, l.logger, entry, jsonContext, jp, rclientFactory)
 			return enginecontext.NewDeferredLoader(entry.Name, l)
 		} else {
 			l.logger.Info("disabled loading of ImageRegistry context entry %s", entry.Name)

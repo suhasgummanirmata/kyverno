@@ -52,18 +52,10 @@ func NewPolicyAppliedEvent(source Source, engineResponse engineapi.EngineRespons
 	var bldr strings.Builder
 	defer bldr.Reset()
 
-	var res string
 	if resource.GetNamespace() != "" {
-		res = fmt.Sprintf("%s %s/%s", resource.GetKind(), resource.GetNamespace(), resource.GetName())
+		fmt.Fprintf(&bldr, "%s %s/%s: pass", resource.GetKind(), resource.GetNamespace(), resource.GetName())
 	} else {
-		res = fmt.Sprintf("%s %s", resource.GetKind(), resource.GetName())
-	}
-
-	hasValidate := engineResponse.Policy().GetSpec().HasValidate()
-	if hasValidate {
-		fmt.Fprintf(&bldr, "%s: pass", res)
-	} else {
-		fmt.Fprintf(&bldr, "%s is successfully mutated", res)
+		fmt.Fprintf(&bldr, "%s %s: pass", resource.GetKind(), resource.GetName())
 	}
 
 	return Info{
@@ -94,19 +86,6 @@ func NewResourceViolationEvent(source Source, reason Reason, engineResponse engi
 	}
 }
 
-func NewResourceGenerationEvent(policy, rule string, source Source, resource kyvernov1.ResourceSpec) Info {
-	msg := fmt.Sprintf("Created %s %s as a result of applying policy %s/%s", resource.GetKind(), resource.GetName(), policy, rule)
-
-	return Info{
-		Kind:      resource.GetKind(),
-		Namespace: resource.GetNamespace(),
-		Name:      resource.GetName(),
-		Source:    source,
-		Reason:    PolicyApplied,
-		Message:   msg,
-	}
-}
-
 func NewBackgroundFailedEvent(err error, policy, rule string, source Source, r *unstructured.Unstructured) []Info {
 	if r == nil {
 		return nil
@@ -131,12 +110,7 @@ func NewBackgroundSuccessEvent(policy, rule string, source Source, r *unstructur
 	}
 
 	var events []Info
-	msg := "resource generated"
-
-	if source == MutateExistingController {
-		msg = "resource mutated"
-	}
-
+	msg := fmt.Sprintf("policy %s/%s applied", policy, rule)
 	events = append(events, Info{
 		Kind:      r.GetKind(),
 		Namespace: r.GetNamespace(),

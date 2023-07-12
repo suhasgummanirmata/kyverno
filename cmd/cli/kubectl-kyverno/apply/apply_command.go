@@ -62,9 +62,9 @@ type ApplyCommandConfig struct {
 }
 
 type PolicySet struct {
-	severity    string
-	category    string
-	description string
+	Severity    string
+	Category    string
+	Description string
 }
 
 const (
@@ -359,9 +359,9 @@ func (c *ApplyCommandConfig) ApplyCommandHelper() (*common.ResultCounts, []*unst
 		}
 
 		policyCache[policy.GetName()] = PolicySet{
-			category:    category,
-			severity:    severity,
-			description: description,
+			Category:    category,
+			Severity:    severity,
+			Description: description,
 		}
 	}
 

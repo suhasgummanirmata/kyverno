@@ -164,7 +164,7 @@ func Command() *cobra.Command {
 				}
 			}()
 			applyCommandConfig.PolicyPaths = policyPaths
-			rc, _, skipInvalidPolicies, responses, err := applyCommandConfig.applyCommandHelper()
+			rc, _, skipInvalidPolicies, responses, err := applyCommandConfig.ApplyCommandHelper()
 			if err != nil {
 				return err
 			}
@@ -203,7 +203,7 @@ func Command() *cobra.Command {
 	return cmd
 }
 
-func (c *ApplyCommandConfig) applyCommandHelper() (*common.ResultCounts, []*unstructured.Unstructured, SkippedInvalidPolicies, []engineapi.EngineResponse, error) {
+func (c *ApplyCommandConfig) ApplyCommandHelper() (*common.ResultCounts, []*unstructured.Unstructured, SkippedInvalidPolicies, []engineapi.EngineResponse, error) {
 	var skipInvalidPolicies SkippedInvalidPolicies
 	// check arguments
 	if c.ValuesFile != "" && c.Variables != nil {
@@ -494,7 +494,7 @@ func printSkippedAndInvalidPolicies(skipInvalidPolicies SkippedInvalidPolicies) 
 }
 
 func printReport(engineResponses []engineapi.EngineResponse, auditWarn bool) {
-	clustered, namespaced := buildPolicyReports(auditWarn, engineResponses...)
+	clustered, namespaced := BuildPolicyReports(auditWarn, engineResponses...)
 	if len(clustered) > 0 || len(namespaced) > 0 {
 		fmt.Println(divider)
 		fmt.Println("POLICY REPORT:")

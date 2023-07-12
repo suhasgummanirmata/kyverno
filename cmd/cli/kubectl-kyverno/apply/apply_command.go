@@ -538,7 +538,7 @@ func printReport(engineResponses []engineapi.EngineResponse, auditWarn bool) {
 		fmt.Println(divider)
 		fmt.Println("POLICY REPORT:")
 		fmt.Println(divider)
-		report := mergeClusterReport(clustered, namespaced)
+		report := MergeClusterReport(clustered, namespaced)
 		yamlReport, _ := yaml.Marshal(report)
 		fmt.Println(string(yamlReport))
 	} else {
